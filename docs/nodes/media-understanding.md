@@ -7,7 +7,7 @@ title: "Media understanding"
 sidebarTitle: "Media understanding"
 ---
 
-OpenClaw can summarize inbound media (image/audio/video) before the reply pipeline runs, so command parsing and routing work off short text instead of raw bytes. Understanding auto-detects local tools or provider keys, or you can configure explicit models. Original media is always delivered to the model as usual; when understanding fails or is disabled, the reply flow continues unchanged.
+OpenClaw can summarize inbound media (image/audio/video) before the reply pipeline runs, so command parsing and routing work off short text instead of raw bytes. Understanding auto-detects local tools or provider keys, or you can configure explicit models. In the OpenClaw-managed reply path, successfully described images are represented by text instead of being attached again as native images. Failed, disabled, or unselected images remain eligible for normal native image delivery; understanding errors do not block the reply.
 
 Vendor plugins register capability metadata (which provider supports which media type, default model, priority). OpenClaw core owns the shared `tools.media` config, fallback order, and reply-pipeline integration.
 
@@ -280,9 +280,9 @@ Local attachments stay within the session's allowed media roots. Directory alias
 
 ## Vision models and image replay cost
 
-When the active reply model supports vision natively, OpenClaw skips image understanding by default and injects the raw image into the model context — the model sees the original pixels, and no description pass runs. A consequence is that the image is re-attached on later turns while it remains inside the replay window described in [Session pruning](/concepts/session-pruning#legacy-image-cleanup), so its full image-token cost recurs on those turns by design.
+In the OpenClaw-managed reply path, a vision-capable reply model normally receives native images without a separate description pass. Images retained in later requests can contribute to input cost; the amount depends on the provider and the active runtime's context handling. See [Session pruning](/concepts/session-pruning#legacy-image-cleanup) for the applicable cleanup behavior.
 
-If your sessions attach images that only need to be read once (identify, extract, transcribe) and per-turn image cost matters more than raw pixel access, add an image-capable entry to `tools.media.models[]`. An explicit image entry forces the description pass even when the reply model has native vision: the description text stands in for the raw image from ingestion onward, and later turns replay the short text instead of the image bytes.
+For identification or extraction tasks that do not need continued pixel access, an image-capable entry in `tools.media.models[]` opts into image understanding even when the reply model supports vision. For each selected image that is successfully described, the reply receives description text in place of that native image. This is not a guarantee that every attached image is converted or that later requests contain no images.
 
 ```json5
 {
@@ -296,9 +296,11 @@ If your sessions attach images that only need to be read once (identify, extract
 
 Tradeoffs and boundaries:
 
-- The reply model receives the description text instead of the original pixels, including on the current turn. That fits identification and extraction workflows; it is the wrong tool when the model must inspect pixels directly (screenshots, UI review, visual debugging).
-- Only an explicit image-capable `tools.media.models[]` entry forces this. `tools.media.image.preferredModel` alone does not override the native-vision skip.
-- `tools.media.image.enabled: false` disables image understanding entirely; it does not change native image delivery.
+- Selection defaults to the first matching image only. Use the existing `tools.media.image.attachments` policy to select more, with an explicit `maxAttachments` cap. Failed or unselected images can still be delivered natively.
+- A successful description replaces that image's pixels on the current reply turn. Avoid this when the reply model needs to inspect pixels directly, such as screenshots, UI review, or visual debugging.
+- An explicit image-capable `tools.media.models[]` entry overrides the native-vision skip, subject to the existing enablement, scope, size, and attachment limits. `tools.media.image.preferredModel` alone does not override that skip.
+- `tools.media.image.enabled: false` disables image understanding; it does not disable native image delivery.
+- This describes OpenClaw-managed preprocessing. A native harness that owns image handling has its own delivery and context rules; do not assume this setting controls its image replay or billing.
 
 ## Config examples
 
